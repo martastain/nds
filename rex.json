@@ -1,0 +1,4 @@
+{
+    "https://github.com/martastain/nxtools" : {"python-path" : true},
+    "https://github.com/martastain/mpd" : {"python-path" : true}
+}
