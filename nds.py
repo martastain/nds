@@ -65,7 +65,13 @@ class StreamData(object):
         stream_age = float(ident_max) / self.timescale
         self.stream_deviation = int((stream_age - int(stream_age)) * self.timescale)
         self.start_time = time.time() - stream_age
-        logging.info("{} start time is {}, deviation: {}".format(self.stream_name, self.start_time, self.stream_deviation))
+        logging.info(
+                "{} start time is {}, deviation: {}".format(
+                    self.stream_name,
+                    self.start_time,
+                    self.stream_deviation
+                )
+            )
 
     @property
     def source_manifest_path(self):
@@ -159,7 +165,6 @@ class ManifestTranslator(object):
         return self.streams[stream_name]
 
 
-
 manifest_translator = ManifestTranslator()
 
 #
@@ -178,7 +183,6 @@ def serve_file(file_name):
         return mk_error(404, message="File {} not found".format(file_name))
     return open(file_path, "rb").read()
 
-
 class NMPDServer(object):
     @cherrypy.expose
     def default(self, *args, **kwargs):
@@ -188,12 +192,12 @@ class NMPDServer(object):
         base_name, ext = os.path.splitext(file_name)
         ext = ext.lstrip(".")
         if ext not in DASH_MIMES:
-            return mk_error(400, "Unknown file type requested")
+            return mk_error(400, "Bad request. Unknown file type requested")
 
         stream_name = base_name.split("-")[0]
         stream_data = manifest_translator[stream_name]
         if not stream_data:
-            return mk_error(404, "Stream not found")
+            return mk_error(404, "Requested stream {} not found".format(file_name))
 
         cherrypy.response.headers['Content-Type'] = DASH_MIMES[ext]
         if ext == "mpd":
@@ -204,7 +208,7 @@ class NMPDServer(object):
         stream_name, number = base_name.split("-")
         number = int(number)
         if number > stream_data.current_number:
-            return mk_error(404, "Unable to get segment from future.")
+            return mk_error(404, "{} not found. Requested segment is from the future".format(file_name))
         ts = stream_data.number_to_time(number)
         fname = "{}-{}.{}".format(stream_name, ts, ext)
         logging.info("Serving {} as {}".format(fname, file_name))
