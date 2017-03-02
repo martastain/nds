@@ -33,12 +33,12 @@ class StreamData(object):
         self.timescale = 1000
         self.start_time = 0
         self.segment_duration = 2
-        self.stream_deviation = 0
+        self.stream_deviation = None
         self.manifest = None
 
     @property
     def current_number(self):
-        return int((time.time() - self.start_time) / self.segment_duration)
+        return int((time.time() - self.start_time) / self.segment_duration) + 1
 
     def number_to_time(self, number):
         return int(number * self.segment_duration * self.timescale) + self.stream_deviation
@@ -63,12 +63,17 @@ class StreamData(object):
                 ident_mtime = mtime
 
         stream_age = float(ident_max) / self.timescale
-        self.stream_deviation = int((stream_age - int(stream_age)) * self.timescale)
+#        self.stream_deviation = int((stream_age - int(stream_age)) * self.timescale)
+        if self.stream_deviation is None:
+            self.stream_deviation =  int(ident_max) % self.timescale
+
+            #self.stream_deviation =  int( (stream_age*self.timescale) - (int(stream_age+0.5)*self.timescale))
         self.start_time = time.time() - stream_age
         logging.info(
-                "{} start time is {}, deviation: {}".format(
+                "{} start time is {}, age: {}, deviation: {}".format(
                     self.stream_name,
                     self.start_time,
+                    stream_age,
                     self.stream_deviation
                 )
             )
