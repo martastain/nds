@@ -1,103 +1,52 @@
 #!/usr/bin/env python
 
 import os
-import sys
-import rex
 import time
 import cherrypy
 
-from xml.etree import ElementTree as ET
+import rex
 
-from nxtools import *
+from nds import *
 from mpd import *
 
-settings = {
-        "data_dir" : "/mnt/cache/origin_dash",
-        "host" : "127.0.0.1",
-        "port" : 51100
-    }
 
-DASH_MIMES = {
-        "mpd" : "application/dash+xml",
-        "m4v" : "video/mp4",
-        "m4a" : "audio/mp4"
-    }
-
-def xml(data):
-    return ET.XML(data)
-
-class StreamData(object):
-    def __init__(self, stream_name):
-        self.stream_name = stream_name
-        self.mtime = 0
-        self.timescale = 1000
-        self.start_time = 0
-        self.segment_duration = 2
-        self.stream_deviation = None
+class Stream(object):
+    def __init__(self, name):
+        self.data_dir = settings["data_dir"]
+        self.name = name
+        self.segment_duration = settings["segment_duration"]
+        self.timescale = settings["timescale"]
+        self.manifest_path = os.path.join(self.data_dir, name + ".mpd")
         self.manifest = None
+        self.manifest_mtime = 0
+        self.start_time = 0
+        self.age = 0
+        self.load()
 
-    @property
-    def current_number(self):
-        return int((time.time() - self.start_time) / self.segment_duration) + 1
-
-    def number_to_time(self, number):
-        return int(number * self.segment_duration * self.timescale) + self.stream_deviation
-
-    def get_start_time(self):
-        ident_max = 0
-        ident_mtime = 0
-        for fname in os.listdir(settings["data_dir"]):
-            fpath = os.path.join(settings["data_dir"], fname)
-            if not fname.startswith(self.stream_name + "-"):
-                continue
-            base_name = os.path.splitext(fname)[0]
-            stream_name, ident = base_name.split("-")
-            if stream_name != self.stream_name:
-                continue
-            if not ident.isdigit():
-                continue
-            ident = ident
-            mtime = os.path.getmtime(fpath)
-            if mtime > ident_mtime:
-                ident_max = ident
-                ident_mtime = mtime
-
-        stream_age = float(ident_max) / self.timescale
-#        self.stream_deviation = int((stream_age - int(stream_age)) * self.timescale)
-        if self.stream_deviation is None:
-            self.stream_deviation =  int(ident_max) % self.timescale
-
-            #self.stream_deviation =  int( (stream_age*self.timescale) - (int(stream_age+0.5)*self.timescale))
-        self.start_time = time.time() - stream_age
-        logging.info(
-                "{} start time is {}, age: {}, deviation: {}".format(
-                    self.stream_name,
-                    self.start_time,
-                    stream_age,
-                    self.stream_deviation
-                )
-            )
-
-    @property
-    def source_manifest_path(self):
-        return os.path.join(settings["data_dir"], self.stream_name + ".mpd")
 
     def load(self):
-        prefix = "{urn:mpeg:dash:schema:mpd:2011}"
-        source_manifest_path = self.source_manifest_path
+        self.load_numbers()
+        return self.load_manifest()
 
-        if not os.path.exists(source_manifest_path):
+
+    def load_manifest(self):
+        if not os.path.exists(self.manifest_path):
+            logging.warning("Stream manifest {} does not exist".format(self.name))
+            self.manifest = None
+            return False
+
+        manifest_mtime = os.path.getmtime(self.manifest_path)
+        if manifest_mtime == self.manifest_mtime:
             return False
 
         try:
-            source_manifest = xml(open(source_manifest_path).read())
+            source_manifest = xml(open(self.manifest_path).read())
+            self.manifest_mitme = manifest_mtime
         except Exception:
-            log_traceback()
+            log_traceback("Unable to open {} manifest".format(self.name))
             return False
 
-        if not self.start_time:
-            self.get_start_time()
-
+        prefix = "{urn:mpeg:dash:schema:mpd:2011}"
         manifest = MPD()
 
         manifest["type"] = "dynamic"
@@ -124,8 +73,12 @@ class StreamData(object):
 #            contentType="video"
 #            par="16:9"
 
-            for source_representation in source_adaptation_set.findall(prefix + "Representation"):
-                representation = adaptation_set.add_representation(**source_representation.attrib)
+            for source_representation in source_adaptation_set.findall(
+                        prefix + "Representation"
+                    ):
+                representation = adaptation_set.add_representation(
+                        **source_representation.attrib
+                    )
 
                 sseg = source_representation.find(prefix + "SegmentTemplate")
                 mext = os.path.splitext(sseg.attrib["media"])[1]
@@ -136,10 +89,9 @@ class StreamData(object):
                         duration=2000,
                         startNumber=0,
                         initialization=sseg.attrib["initialization"],
-                        media="{}-$Number${}".format(self.stream_name, mext)
+                        media="{}-$Number${}".format(self.name, mext)
                         )
 
-        self.mtime = os.path.getmtime(source_manifest_path)
         self.manifest = manifest.xml
         return True
 
@@ -147,27 +99,75 @@ class StreamData(object):
 
 
 
+    def load_numbers(self):
+        mtimes = {}
+        for fname in os.listdir(self.data_dir):
+            fpath = os.path.join(self.data_dir, fname)
+            if not fname.startswith(self.name + "-"):
+                continue
+            base_name = os.path.splitext(fname)[0]
+            elms = base_name.split("-")
+            stream_name = elms[0]
+            ident = elms[-1]
+            if stream_name != self.name:
+                continue
+            if not ident.isdigit():
+                continue
+            ident = int(ident)
+            if ident in mtimes:
+                continue
+            mtimes[ident] = os.path.getmtime(fpath)
+
+        if not mtimes:
+            return
+
+        max_ident = max(mtimes.keys(), key=lambda x: mtimes[x])
+        max_ident_mtime = mtimes[max_ident]
+        numbers = {}
+        for ident in sorted(mtimes.keys()):
+            if ident > max_ident:
+                continue # skip orphaned numbers
+            number = ident / (self.segment_duration * self.timescale)
+            numbers[number] = ident
+        self.numbers = numbers
+
+        self.age = max_ident / self.timescale
+
+        # Tohle neni start time, ale takovej ten zacatek pro PVR...
+        #age = len(self.numbers) * self.segment_duration
+
+        self.start_time = time.time() - self.age
+        logging.info("Start time: {}, Age: {}".format(format_time(self.start_time), self.age))
+
+
+    @property
+    def current_number(self):
+        # If current number is -1, stream is not available yet
+        return int(self.age / self.segment_duration)
+
+    def number_to_time(self, number):
+        try:
+            return self.numbers[number]
+        except KeyError:
+            log_traceback()
+            return False
+
+
 class ManifestTranslator(object):
     def __init__(self):
         self.streams = {}
 
-    def load_stream(self, stream_name):
-        logging.debug("Updating stream {} source manifest".format(stream_name))
-        stream = StreamData(stream_name)
-        if not stream.load():
-            return False
-        self.streams[stream_name] = stream
-        return True
-
-    def __getitem__(self, stream_name):
-        if not stream_name in self.streams:
-            logging.info("Loading stream {} data".format(stream_name))
-            if not self.load_stream(stream_name):
-                logging.error("Unable to load stream {}".format(stream_name))
+    def __getitem__(self, name):
+        if not name in self.streams:
+            logging.info("Loading stream {} data".format(name))
+            stream = Stream(name)
+            if not stream.load():
                 return False
-        if self.streams[stream_name].mtime != os.path.getmtime(self.streams[stream_name].source_manifest_path):
-            self.load_stream(stream_name)
-        return self.streams[stream_name]
+            self.streams[name] = stream
+        else:
+            if not self.streams[name].load():
+                return False
+        return self.streams[name]
 
 
 manifest_translator = ManifestTranslator()
@@ -188,6 +188,7 @@ def serve_file(file_name):
         return mk_error(404, message="File {} not found".format(file_name))
     return open(file_path, "rb").read()
 
+
 class NMPDServer(object):
     @cherrypy.expose
     def default(self, *args, **kwargs):
@@ -202,7 +203,7 @@ class NMPDServer(object):
         stream_name = base_name.split("-")[0]
         stream_data = manifest_translator[stream_name]
         if not stream_data:
-            return mk_error(404, "Requested stream {} not found".format(file_name))
+            return mk_error(404, "Requested stream {} not found".format(stream_name))
 
         cherrypy.response.headers['Content-Type'] = DASH_MIMES[ext]
         if ext == "mpd":
@@ -213,11 +214,18 @@ class NMPDServer(object):
         stream_name, number = base_name.split("-")
         number = int(number)
         if number > stream_data.current_number:
-            return mk_error(404, "{} not found. Requested segment is from the future".format(file_name))
+            return mk_error(
+                    404,
+                    "{} not found. Requested segment is from the future".format(file_name)
+                )
         ts = stream_data.number_to_time(number)
+        if not ts:
+            return mk_error(404, "{} not found. Creation in progress??".format(file_name))
         fname = "{}-{}.{}".format(stream_name, ts, ext)
         logging.info("Serving {} as {}".format(fname, file_name))
         return serve_file(fname)
+
+
 
 
 if __name__ == "__main__":
