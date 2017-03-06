@@ -50,13 +50,12 @@ class Stream(object):
         manifest = MPD()
 
         manifest["type"] = "dynamic"
-        manifest["minimumUpdatePeriod"] = "PT3M"
-        manifest["minBufferTime"] = "PT4S"
-        manifest["timeShiftBufferDepth"] = "PT3M"
+        manifest["minimumUpdatePeriod"] = "PT2S"
+        manifest["minBufferTime"] = "PT8S"
         manifest["maxSegmentDuration"] = "PT2S"
 
         manifest.set_time("availabilityStartTime", self.start_time)
-        manifest.set_time("publishTime", self.start_time)
+        manifest.set_time("publishTime", time.time())
 
         source_period = source_manifest.find(prefix + "Period")
         period = manifest.add_period(**source_period.attrib)
@@ -87,7 +86,7 @@ class Stream(object):
                         representation,
                         timescale=1000,
                         duration=2000,
-                        startNumber=0,
+                        startNumber=None,
                         initialization=sseg.attrib["initialization"],
                         media="{}-$Number${}".format(self.name, mext)
                         )
@@ -136,21 +135,24 @@ class Stream(object):
         # Tohle neni start time, ale takovej ten zacatek pro PVR...
         #age = len(self.numbers) * self.segment_duration
 
-        self.start_time = time.time() - self.age
-        logging.info("Start time: {}, Age: {}".format(format_time(self.start_time), self.age))
+        self.start_time = time.time() - self.age + self.segment_duration
+        logging.info("Start time: {}, Age: {}, Current number: {}".format(
+            format_time(self.start_time),
+            self.age,
+            self.current_number
+            ))
 
 
     @property
     def current_number(self):
-        # If current number is -1, stream is not available yet
-        return int(self.age / self.segment_duration)
+        return max(self.numbers.keys())
 
     def number_to_time(self, number):
         try:
             return self.numbers[number]
         except KeyError:
             log_traceback()
-            return False
+            return None
 
 
 class ManifestTranslator(object):
@@ -219,10 +221,10 @@ class NMPDServer(object):
                     "{} not found. Requested segment is from the future".format(file_name)
                 )
         ts = stream_data.number_to_time(number)
-        if not ts:
+        if ts is None:
             return mk_error(404, "{} not found. Creation in progress??".format(file_name))
         fname = "{}-{}.{}".format(stream_name, ts, ext)
-        logging.info("Serving {} as {}".format(fname, file_name))
+        logging.debug("Serving {} as {}".format(fname, file_name))
         return serve_file(fname)
 
 
