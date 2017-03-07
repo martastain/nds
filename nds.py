@@ -49,11 +49,6 @@ class Stream(object):
         prefix = "{urn:mpeg:dash:schema:mpd:2011}"
         manifest = MPD()
 
-        manifest["type"] = "dynamic"
-        manifest["minimumUpdatePeriod"] = "PT2S"
-        manifest["minBufferTime"] = "PT8S"
-        manifest["maxSegmentDuration"] = "PT2S"
-
         manifest.set_time("availabilityStartTime", self.start_time)
         manifest.set_time("publishTime", time.time())
 
@@ -86,7 +81,7 @@ class Stream(object):
                         representation,
                         timescale=1000,
                         duration=2000,
-                        startNumber=None,
+                        startNumber=0,
                         initialization=sseg.attrib["initialization"],
                         media="{}-$Number${}".format(self.name, mext)
                         )
