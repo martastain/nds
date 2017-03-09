@@ -1,0 +1,5 @@
+{
+    "data_dir" : "/mnt/cache/dash",
+    "segment_duration" : 2,
+    "timescale" : 1000
+}
