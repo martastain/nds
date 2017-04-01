@@ -61,7 +61,7 @@ class NMPDServer(object):
         if ts is None:
             return mk_error(404, "{} not found. Creation in progress??".format(file_name))
         fname = "{}-{}.{}".format(stream_name, ts, ext)
-        logging.debug("Serving {} as {}".format(fname, file_name))
+#        logging.debug("Serving {} as {}".format(fname, file_name))
         return serve_file(fname)
 
 

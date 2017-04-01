@@ -101,7 +101,10 @@ class Stream(object):
             ident = int(ident)
             if ident in mtimes:
                 continue
-            mtimes[ident] = os.path.getmtime(fpath)
+            try:
+                mtimes[ident] = os.path.getmtime(fpath)
+            except OSError:
+                logging.warning("{} is missing".format(fname))
 
         if not mtimes:
             return
@@ -116,17 +119,23 @@ class Stream(object):
             numbers[number] = ident
         self.numbers = numbers
 
-        self.age = max_ident / self.timescale
+
+        self.age  = max_ident / self.timescale
 
         # Tohle neni start time, ale takovej ten zacatek pro PVR...
         #age = len(self.numbers) * self.segment_duration
 
-        self.start_time = time.time() - self.age + self.segment_duration
-        logging.info("Start time: {}, Age: {}, Current number: {}".format(
-            format_time(self.start_time),
-            self.age,
-            self.current_number
-            ))
+        # reset availability start time if age differs too muc
+        new_start_time = time.time() - self.age + self.segment_duration
+
+        if (not self.start_time) or new_start_time > self.start_time + self.segment_duration:
+            self.start_time = new_start_time
+            logging.info("Start time: {}, Age: {}, Current number: {}, Last segment time: {}".format(
+                    format_time(self.start_time),
+                    self.age,
+                    self.current_number,
+                    format_time(max_ident_mtime),
+                ))
 
 
     @property
